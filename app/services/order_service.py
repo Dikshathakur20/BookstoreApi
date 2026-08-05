@@ -3,6 +3,7 @@ from app.core.exceptions import NotFoundException, BadRequestException
 from app.schemas.order import OrderCreate, OrderUpdateStatus
 from app.services.cart_service import CartService
 from app.services.book_service import BookService
+from datetime import datetime, timedelta
 
 class OrderService:
     @staticmethod
@@ -16,7 +17,6 @@ class OrderService:
         order_items = []
         
         for item in cart["items"]:
-            # ✅ Fix: Cart service mein "book" field hai, "books" nahi
             book = item.get("book")
             if not book:
                 raise BadRequestException("Book data not found in cart item")
@@ -47,18 +47,18 @@ class OrderService:
         
         order = order_response.data[0]
         
-        # ✅ Insert order items
+        # Insert order items
         for item in order_items:
             item["order_id"] = order["id"]
             supabase.table("order_items").insert(item).execute()
         
-        # ✅ Update stock
+        # Update stock
         for item in cart["items"]:
             book_id = item.get("book_id")
             quantity = item.get("quantity", 0)
             BookService.update_stock(book_id, -quantity)
         
-        # ✅ Clear cart
+        # Clear cart
         CartService.clear_cart(user_id)
         
         return OrderService.get_order(order["id"], user_id)
@@ -74,19 +74,43 @@ class OrderService:
         
         order = response.data[0]
         
+        # ✅ Calculate estimated delivery (3 days from order creation)
+        created_at = order.get("created_at")
+        if created_at:
+            if isinstance(created_at, str):
+                created_at = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+            order["estimated_delivery"] = created_at + timedelta(days=3)
+        else:
+            order["estimated_delivery"] = datetime.now() + timedelta(days=3)
+        
         # ✅ Transform order items with book data
         if "order_items" in order:
             for item in order["order_items"]:
                 if "books" in item and item["books"]:
                     book = item["books"]
+                    
+                    # ✅ Add book_name
+                    item["book_name"] = book.get("title")
+                    
                     # Add category_name if needed
                     if "categories" in book and book["categories"]:
                         book["category_name"] = book["categories"]["name"]
                         book.pop("categories", None)
+                    
                     # Add book_id
                     book["book_id"] = book["id"]
                     item["book"] = book
                     item.pop("books", None)
+                    
+                    # ✅ Add delivery date for each item
+                    if created_at:
+                        if isinstance(created_at, str):
+                            created_at_dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                        else:
+                            created_at_dt = created_at
+                        item["delivery_date"] = created_at_dt + timedelta(days=3)
+                    else:
+                        item["delivery_date"] = datetime.now() + timedelta(days=3)
         
         return order
     
@@ -109,16 +133,42 @@ class OrderService:
         # ✅ Transform each order
         items = []
         for order in response.data:
+            # ✅ Calculate estimated delivery
+            created_at = order.get("created_at")
+            if created_at:
+                if isinstance(created_at, str):
+                    created_at_dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                else:
+                    created_at_dt = created_at
+                order["estimated_delivery"] = created_at_dt + timedelta(days=3)
+            else:
+                order["estimated_delivery"] = datetime.now() + timedelta(days=3)
+            
             if "order_items" in order:
                 for item in order["order_items"]:
                     if "books" in item and item["books"]:
                         book = item["books"]
+                        
+                        # ✅ Add book_name
+                        item["book_name"] = book.get("title")
+                        
                         if "categories" in book and book["categories"]:
                             book["category_name"] = book["categories"]["name"]
                             book.pop("categories", None)
                         book["book_id"] = book["id"]
                         item["book"] = book
                         item.pop("books", None)
+                        
+                        # ✅ Add delivery date for each item
+                        if created_at:
+                            if isinstance(created_at, str):
+                                created_at_dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                            else:
+                                created_at_dt = created_at
+                            item["delivery_date"] = created_at_dt + timedelta(days=3)
+                        else:
+                            item["delivery_date"] = datetime.now() + timedelta(days=3)
+            
             items.append(order)
         
         return {

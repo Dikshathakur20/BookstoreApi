@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List
 from app.schemas.book import BookResponse
 
@@ -11,6 +11,9 @@ class OrderItemBase(BaseModel):
 class OrderItemResponse(OrderItemBase):
     id: str
     book: Optional[BookResponse] = None
+    # ✅ Extra fields for order item
+    book_name: Optional[str] = None  # Book title
+    delivery_date: Optional[datetime] = None  # 3 days from order
 
     class Config:
         from_attributes = True
@@ -32,6 +35,8 @@ class OrderResponse(BaseModel):
     notes: Optional[str]
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
+    # ✅ Additional fields
+    estimated_delivery: Optional[datetime] = None  # 3 days from order
     items: List[OrderItemResponse] = []
 
     class Config:
