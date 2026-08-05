@@ -1,19 +1,18 @@
+# app/schemas/order.py
+
 from pydantic import BaseModel, Field
 from datetime import datetime, timedelta
 from typing import Optional, List
 from app.schemas.book import BookResponse
 
-class OrderItemBase(BaseModel):
-    book_id: str
-    quantity: int = Field(..., ge=1)
-    price_at_time: float = Field(..., ge=0)
-
-class OrderItemResponse(OrderItemBase):
+class OrderItemResponse(BaseModel):
     id: str
+    book_id: str
+    quantity: int
+    price_at_time: float
     book: Optional[BookResponse] = None
-    # ✅ Extra fields for order item
-    book_name: Optional[str] = None  # Book title
-    delivery_date: Optional[datetime] = None  # 3 days from order
+    book_name: Optional[str] = None
+    delivery_date: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -35,8 +34,7 @@ class OrderResponse(BaseModel):
     notes: Optional[str]
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
-    # ✅ Additional fields
-    estimated_delivery: Optional[datetime] = None  # 3 days from order
+    estimated_delivery: Optional[datetime] = None
     items: List[OrderItemResponse] = []
 
     class Config:
