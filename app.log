@@ -375,3 +375,6 @@ app.core.exceptions.UnauthorizedException: 401: Invalid credentials
 2026-08-03 13:00:35 - bookstore_api - INFO - User registered: user@example.com
 2026-08-03 13:00:35 - bookstore_api - INFO - Login attempt: user@example.com
 2026-08-03 13:00:35 - bookstore_api - INFO - User logged in: user@example.com
+2026-08-05 11:00:53 - bookstore_api - INFO - Root endpoint called
+2026-08-05 11:02:12 - bookstore_api - INFO - Login attempt: diksha@antheminfotech.com
+2026-08-05 11:02:13 - bookstore_api - INFO - User logged in: diksha@antheminfotech.com

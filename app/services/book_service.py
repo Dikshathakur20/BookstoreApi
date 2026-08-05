@@ -14,7 +14,8 @@ class BookService:
         page: int = 1,
         limit: int = 10
     ):
-        query = supabase.table("books").select("*, categories(*)")
+        # ✅ Sirf category name fetch karo (categories(name))
+        query = supabase.table("books").select("*, categories(name)")
         
         if q:
             query = query.ilike("title", f"%{q}%")
@@ -27,32 +28,71 @@ class BookService:
         if max_price is not None:
             query = query.lte("price", max_price)
         
-        count_response = query.execute()
-        total = len(count_response.data)
+        # ✅ Count ke liye alag query (kyunki range() count affect karti hai)
+        count_query = supabase.table("books").select("*", count="exact")
+        if q:
+            count_query = count_query.ilike("title", f"%{q}%")
+        if category_id:
+            count_query = count_query.eq("category_id", category_id)
+        if author:
+            count_query = count_query.ilike("author", f"%{author}%")
+        if min_price is not None:
+            count_query = count_query.gte("price", min_price)
+        if max_price is not None:
+            count_query = count_query.lte("price", max_price)
+        
+        count_response = count_query.execute()
+        total = count_response.count if hasattr(count_response, 'count') else len(count_response.data)
         
         offset = (page - 1) * limit
         query = query.range(offset, offset + limit - 1)
         
         response = query.execute()
         
+        # ✅ Data transform karo - category_name extract karo
+        items = []
+        for item in response.data:
+            # Category name extract karo
+            if "categories" in item and item["categories"]:
+                item["category_name"] = item["categories"]["name"]
+            else:
+                item["category_name"] = None
+            
+            # Categories object hata do (optional)
+            item.pop("categories", None)
+            
+            items.append(item)
+        
         return {
-            "items": response.data,
+            "items": items,
             "total": total,
             "page": page,
-            "pages": (total + limit - 1) // limit,
+            "pages": (total + limit - 1) // limit if total > 0 else 1,
             "limit": limit
         }
     
     @staticmethod
     def get_book(book_id: str):
-        response = supabase.table("books").select("*, categories(*)") \
+        # ✅ Sirf category name fetch karo
+        response = supabase.table("books").select("*, categories(name)") \
             .eq("id", book_id) \
             .execute()
         
         if not response.data:
             raise NotFoundException("Book not found")
         
-        return response.data[0]
+        book = response.data[0]
+        
+        # ✅ Category name extract karo
+        if "categories" in book and book["categories"]:
+            book["category_name"] = book["categories"]["name"]
+        else:
+            book["category_name"] = None
+        
+        # Categories object hata do
+        book.pop("categories", None)
+        
+        return book
     
     @staticmethod
     def create_book(book_data: BookCreate):
@@ -61,10 +101,13 @@ class BookService:
         if not response.data:
             raise Exception("Failed to create book")
         
-        return response.data[0]
+        # ✅ Created book ko fetch karo with category name
+        book_id = response.data[0]["id"]
+        return BookService.get_book(book_id)
     
     @staticmethod
     def update_book(book_id: str, book_data: BookUpdate):
+        # Check if book exists
         BookService.get_book(book_id)
         
         update_dict = book_data.model_dump(exclude_unset=True)
@@ -75,10 +118,12 @@ class BookService:
         if not response.data:
             raise Exception("Failed to update book")
         
-        return response.data[0]
+        # ✅ Updated book ko fetch karo with category name
+        return BookService.get_book(book_id)
     
     @staticmethod
     def delete_book(book_id: str):
+        # Check if book exists
         BookService.get_book(book_id)
         
         response = supabase.table("books").delete() \
@@ -105,4 +150,5 @@ class BookService:
         if not response.data:
             raise Exception("Failed to update stock")
         
-        return response.data[0]
+        # ✅ Updated book ko fetch karo with category name
+        return BookService.get_book(book_id)

@@ -41,7 +41,8 @@ class BookResponse(BookBase):
     rating_count: int = 0
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
-    category: Optional[CategoryResponse] = None
+    category_name: Optional[str] = None  # ✅ Category name field add kiya
+    # category: Optional[CategoryResponse] = None  # Comment out or remove
 
     class Config:
         from_attributes = True
