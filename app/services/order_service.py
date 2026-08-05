@@ -16,15 +16,21 @@ class OrderService:
         order_items = []
         
         for item in cart["items"]:
-            book = item["books"]
+            # ✅ Fix: Cart service mein "book" field hai, "books" nahi
+            book = item.get("book")
+            if not book:
+                raise BadRequestException("Book data not found in cart item")
             
-            if book["stock_quantity"] < item["quantity"]:
+            book_id = item.get("book_id")
+            quantity = item.get("quantity", 0)
+            
+            if book["stock_quantity"] < quantity:
                 raise BadRequestException(f"Insufficient stock for {book['title']}")
             
-            total_amount += item["quantity"] * book["price"]
+            total_amount += quantity * book["price"]
             order_items.append({
-                "book_id": item["book_id"],
-                "quantity": item["quantity"],
+                "book_id": book_id,
+                "quantity": quantity,
                 "price_at_time": book["price"]
             })
         
@@ -41,13 +47,18 @@ class OrderService:
         
         order = order_response.data[0]
         
+        # ✅ Insert order items
         for item in order_items:
             item["order_id"] = order["id"]
             supabase.table("order_items").insert(item).execute()
         
+        # ✅ Update stock
         for item in cart["items"]:
-            BookService.update_stock(item["book_id"], -item["quantity"])
+            book_id = item.get("book_id")
+            quantity = item.get("quantity", 0)
+            BookService.update_stock(book_id, -quantity)
         
+        # ✅ Clear cart
         CartService.clear_cart(user_id)
         
         return OrderService.get_order(order["id"], user_id)
@@ -61,7 +72,23 @@ class OrderService:
         if not response.data:
             raise NotFoundException("Order not found")
         
-        return response.data[0]
+        order = response.data[0]
+        
+        # ✅ Transform order items with book data
+        if "order_items" in order:
+            for item in order["order_items"]:
+                if "books" in item and item["books"]:
+                    book = item["books"]
+                    # Add category_name if needed
+                    if "categories" in book and book["categories"]:
+                        book["category_name"] = book["categories"]["name"]
+                        book.pop("categories", None)
+                    # Add book_id
+                    book["book_id"] = book["id"]
+                    item["book"] = book
+                    item.pop("books", None)
+        
+        return order
     
     @staticmethod
     def get_user_orders(user_id: str, page: int = 1, limit: int = 10):
@@ -79,8 +106,23 @@ class OrderService:
             .range(offset, offset + limit - 1) \
             .execute()
         
+        # ✅ Transform each order
+        items = []
+        for order in response.data:
+            if "order_items" in order:
+                for item in order["order_items"]:
+                    if "books" in item and item["books"]:
+                        book = item["books"]
+                        if "categories" in book and book["categories"]:
+                            book["category_name"] = book["categories"]["name"]
+                            book.pop("categories", None)
+                        book["book_id"] = book["id"]
+                        item["book"] = book
+                        item.pop("books", None)
+            items.append(order)
+        
         return {
-            "items": response.data,
+            "items": items,
             "total": total,
             "page": page,
             "pages": (total + limit - 1) // limit,
