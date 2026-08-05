@@ -40,69 +40,93 @@ class OrderService:
         order_data_dict["status"] = "pending"
         order_data_dict["payment_status"] = "pending"
         
+        # ✅ Insert order
         order_response = supabase.table("orders").insert(order_data_dict).execute()
         
         if not order_response.data:
             raise Exception("Failed to create order")
         
         order = order_response.data[0]
+        print(f"✅ Order created: {order['id']}")  # Debug log
         
-        # Insert order items
+        # ✅ Insert order items - ONE BY ONE with proper error handling
         for item in order_items:
             item["order_id"] = order["id"]
-            supabase.table("order_items").insert(item).execute()
+            print(f"📦 Inserting order item: {item}")  # Debug log
+            
+            try:
+                item_response = supabase.table("order_items").insert(item).execute()
+                if not item_response.data:
+                    print(f"❌ Failed to insert item: {item}")
+                else:
+                    print(f"✅ Item inserted: {item_response.data[0]['id']}")
+            except Exception as e:
+                print(f"❌ Error inserting item: {e}")
+                # Don't raise, continue with other items
         
-        # Update stock
+        # ✅ Update stock
         for item in cart["items"]:
             book_id = item.get("book_id")
             quantity = item.get("quantity", 0)
-            BookService.update_stock(book_id, -quantity)
+            try:
+                BookService.update_stock(book_id, -quantity)
+            except Exception as e:
+                print(f"❌ Error updating stock for {book_id}: {e}")
         
-        # Clear cart
-        CartService.clear_cart(user_id)
+        # ✅ Clear cart
+        try:
+            CartService.clear_cart(user_id)
+        except Exception as e:
+            print(f"❌ Error clearing cart: {e}")
         
+        # ✅ Return order with items
         return OrderService.get_order(order["id"], user_id)
     
     @staticmethod
     def get_order(order_id: str, user_id: str):
-        response = supabase.table("orders").select("*, order_items(*, books(*))") \
+        # ✅ First get order
+        order_response = supabase.table("orders").select("*") \
             .eq("id", order_id) \
             .execute()
         
-        if not response.data:
+        if not order_response.data:
             raise NotFoundException("Order not found")
         
-        order = response.data[0]
+        order = order_response.data[0]
         
-        # ✅ Calculate estimated delivery (3 days from order creation)
+        # ✅ Then get order items with book data
+        items_response = supabase.table("order_items").select("*, books(*)") \
+            .eq("order_id", order_id) \
+            .execute()
+        
+        order["order_items"] = items_response.data if items_response.data else []
+        
+        # ✅ Calculate estimated delivery
         created_at = order.get("created_at")
         if created_at:
             if isinstance(created_at, str):
-                created_at = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-            order["estimated_delivery"] = created_at + timedelta(days=3)
+                created_at_dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+            else:
+                created_at_dt = created_at
+            order["estimated_delivery"] = created_at_dt + timedelta(days=3)
         else:
             order["estimated_delivery"] = datetime.now() + timedelta(days=3)
         
         # ✅ Transform order items with book data
-        if "order_items" in order:
+        if "order_items" in order and order["order_items"]:
             for item in order["order_items"]:
                 if "books" in item and item["books"]:
                     book = item["books"]
-                    
-                    # ✅ Add book_name
                     item["book_name"] = book.get("title")
                     
-                    # Add category_name if needed
                     if "categories" in book and book["categories"]:
                         book["category_name"] = book["categories"]["name"]
                         book.pop("categories", None)
                     
-                    # Add book_id
                     book["book_id"] = book["id"]
                     item["book"] = book
                     item.pop("books", None)
                     
-                    # ✅ Add delivery date for each item
                     if created_at:
                         if isinstance(created_at, str):
                             created_at_dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
@@ -118,21 +142,30 @@ class OrderService:
     def get_user_orders(user_id: str, page: int = 1, limit: int = 10):
         offset = (page - 1) * limit
         
+        # ✅ Get count
         count_response = supabase.table("orders").select("*", count="exact") \
             .eq("user_id", user_id) \
             .execute()
         
         total = count_response.count
         
-        response = supabase.table("orders").select("*, order_items(*, books(*))") \
+        # ✅ Get orders with pagination
+        orders_response = supabase.table("orders").select("*") \
             .eq("user_id", user_id) \
             .order("created_at", desc=True) \
             .range(offset, offset + limit - 1) \
             .execute()
         
-        # ✅ Transform each order
+        # ✅ For each order, fetch items
         items = []
-        for order in response.data:
+        for order in orders_response.data:
+            # ✅ Get order items
+            items_response = supabase.table("order_items").select("*, books(*)") \
+                .eq("order_id", order["id"]) \
+                .execute()
+            
+            order["order_items"] = items_response.data if items_response.data else []
+            
             # ✅ Calculate estimated delivery
             created_at = order.get("created_at")
             if created_at:
@@ -144,22 +177,21 @@ class OrderService:
             else:
                 order["estimated_delivery"] = datetime.now() + timedelta(days=3)
             
-            if "order_items" in order:
+            # ✅ Transform order items
+            if "order_items" in order and order["order_items"]:
                 for item in order["order_items"]:
                     if "books" in item and item["books"]:
                         book = item["books"]
-                        
-                        # ✅ Add book_name
                         item["book_name"] = book.get("title")
                         
                         if "categories" in book and book["categories"]:
                             book["category_name"] = book["categories"]["name"]
                             book.pop("categories", None)
+                        
                         book["book_id"] = book["id"]
                         item["book"] = book
                         item.pop("books", None)
                         
-                        # ✅ Add delivery date for each item
                         if created_at:
                             if isinstance(created_at, str):
                                 created_at_dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
@@ -175,7 +207,7 @@ class OrderService:
             "items": items,
             "total": total,
             "page": page,
-            "pages": (total + limit - 1) // limit,
+            "pages": (total + limit - 1) // limit if total > 0 else 1,
             "limit": limit
         }
     
