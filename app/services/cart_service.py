@@ -8,53 +8,66 @@ from app.services.book_service import BookService
 class CartService:
     @staticmethod
     def get_cart(user_id: str):
-        # ✅ Sirf category name fetch karo
         response = supabase.table("cart").select("*, books(id, title, author, description, price, stock_quantity, category_id, cover_image_url, rating_avg, rating_count, created_at, updated_at, categories(name))") \
             .eq("user_id", user_id) \
             .execute()
         
         items = response.data
         
-        # ✅ Transform karo - har cart item mein book ka data fix karo
         transformed_items = []
+        out_of_stock_items = []
+        has_out_of_stock = False
+        
         for item in items:
             if item.get("books"):
                 book = item["books"]
-                # Category name extract karo
+                
+                # ✅ Check stock
+                stock_quantity = book.get("stock_quantity", 0)
+                requested_quantity = item.get("quantity", 1)
+                is_in_stock = stock_quantity >= requested_quantity
+                
+                if not is_in_stock:
+                    has_out_of_stock = True
+                    out_of_stock_items.append(book.get("title", "Unknown Book"))
+                
+                # Category name
                 if "categories" in book and book["categories"]:
                     book["category_name"] = book["categories"]["name"]
                 else:
                     book["category_name"] = None
                 
-                # Categories object hata do
                 book.pop("categories", None)
-                
-                # ✅ book_id add karo (frontend ke liye)
                 book["book_id"] = book["id"]
                 
-                item["book"] = book  # ✅ "books" ko "book" mein convert karo
-                item.pop("books", None)  # ✅ Purana "books" hata do
+                item["book"] = book
+                item["in_stock"] = is_in_stock
+                item["max_available"] = stock_quantity
+                item.pop("books", None)
             
             transformed_items.append(item)
         
         total_items = sum(item["quantity"] for item in transformed_items)
         total_price = sum(
             item["quantity"] * item["book"]["price"] 
-            for item in transformed_items if item.get("book")
+            for item in transformed_items if item.get("book") and item.get("in_stock", True)
         )
         
         return {
             "items": transformed_items,
             "total_items": total_items,
-            "total_price": total_price
+            "total_price": total_price,
+            "has_out_of_stock_items": has_out_of_stock,
+            "out_of_stock_items": out_of_stock_items
         }
     
     @staticmethod
     def add_to_cart(user_id: str, cart_data: CartItemCreate):
+        # ✅ Check stock before adding
         book = BookService.get_book(cart_data.book_id)
         
         if book["stock_quantity"] < cart_data.quantity:
-            raise BadRequestException("Insufficient stock")
+            raise BadRequestException(f"Insufficient stock. Only {book['stock_quantity']} available.")
         
         existing = supabase.table("cart").select("*") \
             .eq("user_id", user_id) \
@@ -63,6 +76,10 @@ class CartService:
         
         if existing.data:
             new_quantity = existing.data[0]["quantity"] + cart_data.quantity
+            # ✅ Check if new quantity exceeds stock
+            if book["stock_quantity"] < new_quantity:
+                raise BadRequestException(f"Cannot add more. Only {book['stock_quantity']} available in stock.")
+            
             response = supabase.table("cart").update({
                 "quantity": new_quantity
             }).eq("id", existing.data[0]["id"]).execute()
@@ -76,13 +93,11 @@ class CartService:
         if not response.data:
             raise Exception("Failed to add to cart")
         
-        # ✅ Return karte waqt cart item fetch karo with book details
         cart_item_id = response.data[0]["id"]
         return CartService.get_cart_item(cart_item_id, user_id)
     
     @staticmethod
     def get_cart_item(cart_item_id: str, user_id: str):
-        """Helper method to get single cart item with book details"""
         response = supabase.table("cart").select("*, books(id, title, author, description, price, stock_quantity, category_id, cover_image_url, rating_avg, rating_count, created_at, updated_at, categories(name))") \
             .eq("id", cart_item_id) \
             .eq("user_id", user_id) \
@@ -93,16 +108,24 @@ class CartService:
         
         item = response.data[0]
         
-        # Transform book data
         if item.get("books"):
             book = item["books"]
+            
+            # ✅ Check stock
+            stock_quantity = book.get("stock_quantity", 0)
+            requested_quantity = item.get("quantity", 1)
+            is_in_stock = stock_quantity >= requested_quantity
+            
             if "categories" in book and book["categories"]:
                 book["category_name"] = book["categories"]["name"]
             else:
                 book["category_name"] = None
             book.pop("categories", None)
             book["book_id"] = book["id"]
+            
             item["book"] = book
+            item["in_stock"] = is_in_stock
+            item["max_available"] = stock_quantity
             item.pop("books", None)
         
         return item
@@ -119,8 +142,10 @@ class CartService:
         
         item = response.data[0]
         
-        if item["books"]["stock_quantity"] < update_data.quantity:
-            raise BadRequestException("Insufficient stock")
+        # ✅ Check stock before updating
+        stock_quantity = item["books"]["stock_quantity"]
+        if stock_quantity < update_data.quantity:
+            raise BadRequestException(f"Insufficient stock. Only {stock_quantity} available.")
         
         update_response = supabase.table("cart").update({
             "quantity": update_data.quantity
@@ -129,7 +154,6 @@ class CartService:
         if not update_response.data:
             raise Exception("Failed to update cart")
         
-        # ✅ Updated cart item fetch karo with book details
         return CartService.get_cart_item(cart_item_id, user_id)
     
     @staticmethod
